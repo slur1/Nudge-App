@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nudge</title>
+  <!-- 1. PWA Manifest Link -->
+  <link rel="manifest" href="manifest.json">
+  <!-- 2. Theme Color for Browser UI -->
+  <meta name="theme-color" content="#FEE2E2">
+  <!-- App Icons for iOS -->
+  <link rel="apple-touch-icon" href="https://placehold.co/192x192/FEE2E2/EF4444?text=Nudge">
+  <!-- 3. Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 4. React Libraries -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- 5. Babel to translate JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <!-- This is where our React app will be displayed -->
+  <div id="root"></div>
+
+  <!-- Our React Code -->
+  <script type="text/babel">
+    // Using 'React' namespace since we are in a browser environment
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // --- CUTE ILLUSTRATIONS (SVG Components) ---
+    const StretchingIcon = () => (<svg viewBox="0 0 100 100" className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M50 20 a 15 15 0 1 1 0 30 a 15 15 0 1 1 0 -30"/><path d="M25 60 h 50 l -10 20 h -30 z"/><path d="M40 80 v 10"/><path d="M60 80 v 10"/><path d="M30 50 l -20 -10"/><path d="M70 50 l 20 -10"/></svg>);
+    const WaterDropIcon = () => (<svg viewBox="0 0 100 100" className="w-16 h-16 mx-auto mb-4" fill="currentColor"><path d="M50 10 C 20 40, 50 90, 50 90 S 80 40, 50 10 Z"/></svg>);
+    const SparkleIcon = () => (<svg viewBox="0 0 100 100" className="w-16 h-16 mx-auto mb-4" fill="currentColor"><path d="M50 10 L 55 45 L 90 50 L 55 55 L 50 90 L 45 55 L 10 50 L 45 45 Z"/></svg>);
+    const HeartIcon = () => (<svg viewBox="0 0 100 100" className="w-16 h-16 mx-auto mb-4" fill="currentColor"><path d="M50 90 L 10 50 C 10 20, 40 10, 50 30 C 60 10, 90 20, 90 50 Z"/></svg>);
+    const PencilIcon = () => (<svg viewBox="0 0 100 100" className="w-16 h-16 mx-auto mb-4" fill="currentColor"><path d="M80 20 L 90 30 L 40 80 L 30 80 L 30 70 Z M 30 80 L 20 90 L 10 80 L 20 70 Z"/></svg>);
+    const WhimsyIcon = () => (<svg viewBox="0 0 100 100" className="w-16 h-16 mx-auto mb-4" fill="currentColor"><path d="M50 10 C 40 20, 35 30, 50 40 C 65 30, 60 20, 50 10 Z M 20 45 C 30 40, 40 45, 45 55 C 40 65, 30 70, 20 65 Z M 80 45 C 70 40, 60 45, 55 55 C 60 65, 70 70, 80 65 Z"/></svg>);
+
+    const illustrations = {
+        exercise: <StretchingIcon />,
+        water: <WaterDropIcon />,
+        mindfulness: <SparkleIcon />,
+        posture: <HeartIcon />,
+        custom: <PencilIcon />,
+        whimsy: <WhimsyIcon />
+    };
+
+    // --- CONFETTI COMPONENT ---
+    const Confetti = ({ active, intensity = 1 }) => {
+        if (!active) return null;
+        const colors = ['#fecaca', '#fef08a', '#bbf7d0', '#bfdbfe', '#e9d5ff'];
+        const numPieces = 30 * intensity;
+        return Array.from({ length: numPieces }).map((_, i) => {
+            const style = {
+                '--x': `${Math.random() * 200 - 100}px`,
+                '--y': `${Math.random() * 200 - 150}px`,
+                '--r': `${Math.random() * 360}deg`,
+                'background': colors[Math.floor(Math.random() * colors.length)],
+            };
+            return <div key={i} className="confetti-piece" style={style}></div>;
+        });
+    };
+    
+    // --- NOTIFICATION COMPONENT ---
+    const Notification = ({ message, onClear }) => {
+        useEffect(() => {
+            if (message) {
+                const timer = setTimeout(() => {
+                    onClear();
+                }, 3000);
+                return () => clearTimeout(timer);
+            }
+        }, [message, onClear]);
+
+        if (!message) return null;
+
+        return (
+            <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-gray-800 text-white py-3 px-6 rounded-full shadow-lg z-[101] animate-fade-in-up">
+                {message}
+            </div>
+        );
+    };
+
+    // --- SETTINGS MODAL COMPONENT ---
+    const SettingsModal = ({
+      isOpen, onClose, activeTheme, themes, currentTheme, onSetTheme,
+      settings, onSetSettings, categoryEmojis, newCustomReminder,
+      onSetNewCustomReminder, onAddCustomReminder, customReminders, onDeleteCustomReminder,
+      volume, onSetVolume, onSoundChange, sound, exerciseDuration, onSetExerciseDuration,
+      onResetCount, isVibrationSupported
+    }) => {
+      if (!isOpen) return null;
+      const isVolumeDisabled = sound === 'none' || sound === 'vibrate';
+      const isExerciseDurationDisabled = !settings.exerciseEnabled;
+      const isCustomNudgeDisabled = !settings.customEnabled;
+
+      const TimeOptions = () => {
+        const options = [];
+        for (let i = 0; i < 24; i++) {
+          const hour12 = i % 12 === 0 ? 12 : i % 12;
+          const ampm = i < 12 ? 'AM' : 'PM';
+          options.push(<option key={i} value={i}>{`${hour12}:00 ${ampm}`}</option>);
+        }
+        return options;
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 rounded-2xl shadow-lg transition-colors duration-500 ${activeTheme.mainCard}`}>
+            <button onClick={onClose} className={`absolute top-4 right-4 text-2xl font-bold ${activeTheme.secondaryText} ${activeTheme.hoverPrimaryText}`}>&times;</button>
+            <h2 className={`text-2xl font-bold mb-6 text-center ${activeTheme.settingsHeader}`}>Settings</h2>
+            
+            <div className={`p-4 rounded-lg ${activeTheme.counterCard} mb-6`}>
+              <h3 className={`text-lg font-semibold mb-4 text-center ${activeTheme.primaryText}`}>General</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                  <div>
+                      <h4 className={`text-md font-semibold mb-2 text-center ${activeTheme.primaryText}`}>Theme</h4>
+                      <div className="relative">
+                        <select value={currentTheme} onChange={(e) => onSetTheme(e.target.value)} className={`w-full p-3 rounded-lg transition text-center font-semibold appearance-none cursor-pointer ${activeTheme.input} ${activeTheme.primaryText}`} >
+                          {Object.keys(themes).map(themeKey => <option key={themeKey} value={themeKey}>{themes[themeKey].name}</option>)}
+                        </select>
+                          <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 ${activeTheme.primaryText}`}><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                      </div>
+                  </div>
+                  <div>
+                      <h4 className={`text-md font-semibold mb-2 text-center ${activeTheme.primaryText}`}>Reminder Sound</h4>
+                      <div className="relative">
+                          <select value={sound} onChange={(e) => onSoundChange(e.target.value)} className={`w-full p-3 rounded-lg transition text-center font-semibold appearance-none cursor-pointer ${activeTheme.input} ${activeTheme.primaryText}`}>
+                              <option value="ping">Ping</option>
+                              <option value="chime">Chime</option>
+                              <option value="sparkle">Sparkle</option>
+                              {isVibrationSupported && <option value="vibrate">Vibrate</option>}
+                              <option value="none">None</option>
+                          </select>
+                          <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 ${activeTheme.primaryText}`}><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                      </div>
+                  </div>
+                  <div className={`transition-opacity duration-300 ${isVolumeDisabled ? 'opacity-50' : 'opacity-100'}`}>
+                   <h4 className={`text-md font-semibold mb-2 text-center ${activeTheme.primaryText}`}>Volume</h4>
+                   <input type="range" min="0" max="1" step="0.05" value={volume} disabled={isVolumeDisabled} onChange={e => onSetVolume(parseFloat(e.target.value))} className={`w-full custom-slider ${activeTheme.slider}`} />
+                 </div>
+                <div className={`transition-opacity duration-300 ${isExerciseDurationDisabled ? 'opacity-50' : 'opacity-100'}`}>
+                      <h4 className={`text-md font-semibold mb-2 text-center ${activeTheme.primaryText}`}>Exercise Duration</h4>
+                      <div className="relative">
+                          <select value={exerciseDuration} disabled={isExerciseDurationDisabled} onChange={(e) => onSetExerciseDuration(parseInt(e.target.value, 10))} className={`w-full p-3 rounded-lg transition text-center font-semibold appearance-none cursor-pointer ${activeTheme.input} ${activeTheme.primaryText}`}>
+                              <option value="0">Random (1-7 min)</option>
+                              <option value="60">1 minute</option>
+                              <option value="180">3 minutes</option>
+                              <option value="300">5 minutes</option>
+                              <option value="420">7 minutes</option>
+                          </select>
+                          <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 ${activeTheme.primaryText}`}><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                      </div>
+                  </div>
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-lg ${activeTheme.counterCard} mb-6`}>
+              <h3 className={`text-lg font-semibold mb-4 text-center ${activeTheme.primaryText}`}>Nudge Types</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                 {Object.keys(categoryEmojis).map(type => (
+                   <label key={type} className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all duration-300 transform hover:scale-105 ${activeTheme.toggleBgs[type]}`}>
+                     <span className="font-semibold">{categoryEmojis[type]} {type.charAt(0).toUpperCase() + type.slice(1)}</span>
+                     <div className="relative">
+                       <input type="checkbox" name={`${type}Enabled`} checked={settings[`${type}Enabled`]} onChange={e => onSetSettings(s => ({...s, [`${type}Enabled`]: e.target.checked}))} className="sr-only peer"/>
+                       <div className={`w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all ${activeTheme.toggleBgs[`${type}Checked`]}`}></div>
+                     </div>
+                   </label>
+                 ))}
+               </div>
+            </div>
+
+            <div className={`p-4 rounded-lg ${activeTheme.counterCard} mb-6`}>
+                <h3 className={`text-lg font-semibold mb-4 text-center ${activeTheme.primaryText}`}>Scheduling</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 mb-4">
+                  <div>
+                      <h4 className={`text-md font-semibold mb-2 text-center ${activeTheme.primaryText}`}>Active From</h4>
+                      <div className="relative">
+                          <select value={settings.activeStartTime} onChange={(e) => onSetSettings(s => ({...s, activeStartTime: parseInt(e.target.value, 10)}))} className={`w-full p-3 rounded-lg transition text-center font-semibold appearance-none cursor-pointer ${activeTheme.input} ${activeTheme.primaryText}`}>
+                              <TimeOptions />
+                          </select>
+                          <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 ${activeTheme.primaryText}`}><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                      </div>
+                  </div>
+                  <div>
+                      <h4 className={`text-md font-semibold mb-2 text-center ${activeTheme.primaryText}`}>Active Until</h4>
+                      <div className="relative">
+                          <select value={settings.activeEndTime} onChange={(e) => onSetSettings(s => ({...s, activeEndTime: parseInt(e.target.value, 10)}))} className={`w-full p-3 rounded-lg transition text-center font-semibold appearance-none cursor-pointer ${activeTheme.input} ${activeTheme.primaryText}`}>
+                              <TimeOptions />
+                          </select>
+                          <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 ${activeTheme.primaryText}`}><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                      </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                  <div>
+                    <label className={`flex justify-between font-semibold mb-1 ${activeTheme.primaryText}`}>
+                        <span>Minimum Interval</span><span>{settings.minInterval} min</span>
+                    </label>
+                    <input type="range" name="minInterval" min="1" max="120" value={settings.minInterval} onChange={e => {
+                        const newMin = parseInt(e.target.value, 10);
+                        onSetSettings(s => ({
+                            ...s,
+                            minInterval: newMin,
+                            maxInterval: newMin >= s.maxInterval ? (newMin + 1 > 240 ? 240 : newMin + 1) : s.maxInterval,
+                        }));
+                    }} className={`w-full custom-slider ${activeTheme.slider}`}/>
+                  </div>
+                  <div>
+                    <label className={`flex justify-between font-semibold mb-1 ${activeTheme.primaryText}`}>
+                        <span>Maximum Interval</span><span>{settings.maxInterval} min</span>
+                    </label>
+                    <input type="range" name="maxInterval" min="5" max="240" value={settings.maxInterval} onChange={e => {
+                        const newMax = parseInt(e.target.value, 10);
+                        onSetSettings(s => ({
+                            ...s,
+                            maxInterval: newMax,
+                            minInterval: newMax <= s.minInterval ? (newMax - 1 < 1 ? 1 : newMax - 1) : s.minInterval,
+                        }));
+                    }} className={`w-full custom-slider ${activeTheme.slider}`}/>
+                  </div>
+                </div>
+            </div>
+            
+            <div className={`p-4 rounded-lg transition-opacity duration-300 ${activeTheme.counterCard} ${isCustomNudgeDisabled ? 'opacity-50' : 'opacity-100'}`}>
+              <h3 className={`text-lg font-semibold mb-4 text-center ${activeTheme.primaryText}`}>Your Nudges</h3>
+              <form onSubmit={onAddCustomReminder} className="flex gap-2 mb-4">
+                <input type="text" value={newCustomReminder} disabled={isCustomNudgeDisabled} onChange={e => onSetNewCustomReminder(e.target.value)} placeholder="e.g., Water the plants!" className={`flex-grow p-2 rounded-lg transition ${activeTheme.input}`}/>
+                <button type="submit" disabled={isCustomNudgeDisabled} className={`text-white font-bold py-2 px-4 rounded-lg shadow-md transition-transform transform hover:scale-110 ${activeTheme.button}`}>Add</button>
+              </form>
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                  {customReminders.length > 0 ? customReminders.map((reminder, index) => (
+                      <div key={index} className="flex items-center justify-between bg-white/80 dark:bg-gray-700/50 p-2 rounded-md">
+                         <span className={activeTheme.primaryText}>{reminder}</span>
+                         <button onClick={() => onDeleteCustomReminder(index)} className="text-red-400 hover:text-red-600 font-bold text-xl transition-transform transform hover:scale-125">&times;</button>
+                      </div>
+                  )) : <p className={`text-sm text-center ${activeTheme.secondaryText}`}>No custom nudges yet!</p>}
+              </div>
+            </div>
+            <div className="text-center mt-6 flex flex-col sm:flex-row gap-4 justify-center">
+                <button onClick={onResetCount} className={`w-full sm:w-auto font-bold py-3 px-6 rounded-full shadow-md transition-transform transform hover:scale-110 bg-white/80 ${activeTheme.primaryText}`}>Reset Daily Count</button>
+                <button onClick={onClose} className={`w-full sm:w-auto text-white font-bold py-3 px-8 rounded-full shadow-md transition-transform transform hover:scale-110 ${activeTheme.button}`}>Done</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Main App Component
+    function App() {
+      // --- THEME DEFINITIONS ---
+      const themes = {
+        sweetberry: {
+            name: "Sweet Berry Burst 🍓", titleFont: 'font-pacifico', popupTitleFont: 'font-pacifico', taglineEmoji: '🍓', bg: 'bg-red-50', pattern: 'bg-pattern-dots', header: 'text-red-500', primaryText: 'text-gray-700', hoverPrimaryText: 'hover:text-red-400', secondaryText: 'text-gray-500', mainCard: 'bg-white/80 border-red-100', counterCard: 'bg-red-100/80 border-red-200', settingsHeader: 'text-rose-600', counterText: 'text-red-500', button: 'bg-red-400 hover:bg-red-500', dndButtonOn: 'bg-purple-400 text-white', dndButtonOff: 'bg-purple-200 text-purple-800', slider: 'accent-red-500', input: 'border-2 border-gray-200 focus:ring-red-400 focus:border-red-400', popupText: 'text-gray-800', border: 'border-red-200',
+            toggleBgs: { exercise: 'bg-rose-50 text-rose-800', water: 'bg-orange-50 text-orange-800', mindfulness: 'bg-green-50 text-green-800', posture: 'bg-yellow-50 text-yellow-800', custom: 'bg-red-50 text-red-800', whimsy: 'bg-purple-50 text-purple-800', exerciseChecked: 'peer-checked:bg-rose-400', waterChecked: 'peer-checked:bg-orange-400', mindfulnessChecked: 'peer-checked:bg-green-400', postureChecked: 'peer-checked:bg-yellow-400', customChecked: 'peer-checked:bg-red-400', whimsyChecked: 'peer-checked:bg-purple-400' }, popupColors: ['bg-red-200', 'bg-rose-200', 'bg-orange-200', 'bg-yellow-200', 'bg-green-200'],
+            content: {
+                exercise: { ideas: [{ text: "a sweet little stretch" }, { text: "some berry fun hops" }, { text: "some quick arm circles" }, { text: "a happy little dance" }], title: "Fruity Fun!" },
+                water: { ideas: [{ text: "Time for a sweet sip!" }, { text: "Hydrate and feel fruitful!" }, { text: "A juicy water break!" }], title: "Berry Thirsty?" },
+                mindfulness: { ideas: [{ text: "A moment of sweet silence." }, { text: "Think of your favorite fruit." }, { text: "Savor a moment of peace."}], title: "Sweet Moment" },
+                posture: { ideas: [{ text: "Sit up straight and sweet!" }, { text: "A sweet posture check." }, {text: "Relax your shoulders, sweetie!"}], title: "Sweet & Straight" },
+                whimsy: { ideas: [{ text: "Fun fact: Strawberries aren't technically berries, but bananas are!" }, { text: "Joke: Why did the strawberry cry? Because its parents were in a jam!" }, { text: "You're doing a berry good job today!"}, { text: "Riddle: What has to be broken before you can use it? An egg!"}, { text: "Life Hack: Freeze grapes to chill drinks without watering them down."}], title: "Whimsy!" }
+            }
+        },
+        mint: {
+            name: "Minty Meadow 🌿", titleFont: 'font-patrick-hand', popupTitleFont: 'font-patrick-hand', taglineEmoji: '🌿', bg: 'bg-green-50', pattern: 'bg-pattern-lines', header: 'text-green-600', primaryText: 'text-gray-700', hoverPrimaryText: 'hover:text-green-500', secondaryText: 'text-gray-500', mainCard: 'bg-white/80 border-green-100', counterCard: 'bg-green-100/80 border-green-200', settingsHeader: 'text-teal-700', counterText: 'text-green-600', button: 'bg-green-500 hover:bg-green-600', dndButtonOn: 'bg-cyan-500 text-white', dndButtonOff: 'bg-cyan-200 text-cyan-800', slider: 'accent-green-500', input: 'border-2 border-gray-200 focus:ring-green-500 focus:border-green-500', popupText: 'text-gray-800', border: 'border-green-200',
+            toggleBgs: { exercise: 'bg-teal-50 text-teal-800', water: 'bg-cyan-50 text-cyan-800', mindfulness: 'bg-emerald-50 text-emerald-800', posture: 'bg-lime-50 text-lime-800', custom: 'bg-orange-50 text-orange-800', whimsy: 'bg-stone-50 text-stone-800', exerciseChecked: 'peer-checked:bg-teal-400', waterChecked: 'peer-checked:bg-cyan-400', mindfulnessChecked: 'peer-checked:bg-emerald-400', postureChecked: 'peer-checked:bg-lime-400', customChecked: 'peer-checked:bg-orange-400', whimsyChecked: 'peer-checked:bg-stone-500' }, popupColors: ['bg-green-200', 'bg-teal-200', 'bg-cyan-200', 'bg-emerald-200', 'bg-lime-200'],
+            content: {
+                exercise: { ideas: [{ text: "stretch like a tall tree! 🌳" }, { text: "do some happy little hops!" }, { text: "some torso twists" }, { text: "a few calf raises" }], title: "Fresh Air!" },
+                water: { ideas: [{ text: "A little sip, like morning dew." }, { text: "Time for some refreshing water!" }, { text: "A cool, crisp sip of water." }], title: "Quench Your Thirst" },
+                mindfulness: { ideas: [{ text: "Listen to the sounds around you." }, { text: "Feel the ground beneath your feet." }, { text: "Notice the details in a leaf."}], title: "Nature Moment" },
+                posture: { ideas: [{ text: "Stand tall like a sunflower! 🌻" }, { text: "Gently align your back." }, { text: "Sit as if a string is lifting you up."}], title: "Posture Freshen Up" },
+                whimsy: { ideas: [{ text: "Fun fact: Some trees 'sleep' at night by relaxing their branches." }, { text: "Riddle: I have cities, but no houses, mountains, but no trees, and water, but no fish. What am I? A map." }, { text: "Keep growing, keep reaching for the sun!"}, {text: "Life Hack: Rub a walnut on scratched wooden furniture to hide dings."}, {text: "Tip: Spending just a few minutes in nature can boost your mood."}], title: "Whimsy!" }
+            }
+        },
+        lavender: {
+            name: "Lavender Dreams 🌙", titleFont: 'font-dancing-script', popupTitleFont: 'font-dancing-script', taglineEmoji: '🌙', bg: 'bg-purple-50', pattern: 'bg-pattern-sparkles', header: 'text-purple-600', primaryText: 'text-gray-700', hoverPrimaryText: 'hover:text-purple-500', secondaryText: 'text-gray-500', mainCard: 'bg-white/80 border-purple-100', counterCard: 'bg-purple-100/80 border-purple-200', settingsHeader: 'text-indigo-700', counterText: 'text-purple-600', button: 'bg-purple-500 hover:bg-purple-600', dndButtonOn: 'bg-blue-500 text-white', dndButtonOff: 'bg-blue-200 text-blue-800', slider: 'accent-purple-500', input: 'border-2 border-gray-200 focus:ring-purple-500 focus:border-purple-500', popupText: 'text-gray-800', border: 'border-purple-200',
+            toggleBgs: { exercise: 'bg-indigo-50 text-indigo-800', water: 'bg-blue-50 text-blue-800', mindfulness: 'bg-violet-50 text-violet-800', posture: 'bg-fuchsia-50 text-fuchsia-800', custom: 'bg-pink-50 text-pink-800', whimsy: 'bg-gray-50 text-gray-800', exerciseChecked: 'peer-checked:bg-indigo-400', waterChecked: 'peer-checked:bg-blue-400', mindfulnessChecked: 'peer-checked:bg-violet-400', postureChecked: 'peer-checked:bg-fuchsia-400', customChecked: 'peer-checked:bg-pink-400', whimsyChecked: 'peer-checked:bg-gray-400' }, popupColors: ['bg-purple-200', 'bg-indigo-200', 'bg-blue-200', 'bg-violet-200', 'bg-fuchsia-200'],
+            content: {
+                exercise: { ideas: [{ text: "a slow, gentle stretch" }, { text: "some calming neck rolls" }, { text: "slow shoulder shrugs" }, { text: "some ankle circles" }], title: "Relax Your Body" },
+                water: { ideas: [{ text: "A calming sip of water." }, { text: "Time for a quiet drink." }, { text: "A moment of liquid calm." }], title: "Gentle Hydration" },
+                mindfulness: { ideas: [{ text: "Close your eyes and just be." }, { text: "Take a slow, dreamy breath." }, { text: "Imagine you're floating on a cloud."}], title: "Peaceful Pause" },
+                posture: { ideas: [{ text: "Gently align your spine." }, { text: "Release the tension in your shoulders." }, { text: "Sit with soft, quiet strength."}], title: "Calm Posture" },
+                whimsy: { ideas: [{ text: "Fun fact: There are more stars in the universe than grains of sand on all the beaches on Earth." }, { text: "Motivational boost: You are made of stardust." }, { text: "A little thought: What is a dream you've been putting off?"}, {text: "Tip: A drop of lavender oil on your pillow can help you relax before sleep."}, {text: "Your peace is a priority."}], title: "Whimsy!" }
+            }
+        },
+        sakura: {
+            name: "Sakura Blossom 🌸", titleFont: 'font-satisfy', popupTitleFont: 'font-satisfy', taglineEmoji: '🌸', bg: 'bg-pink-50', pattern: 'bg-pattern-sparkles', header: 'text-pink-500', primaryText: 'text-gray-700', hoverPrimaryText: 'hover:text-pink-400', secondaryText: 'text-gray-500', mainCard: 'bg-white/80 border-pink-100', counterCard: 'bg-pink-100/80 border-pink-200', settingsHeader: 'text-rose-600', counterText: 'text-pink-500', button: 'bg-pink-400 hover:bg-pink-500', dndButtonOn: 'bg-purple-400 text-white', dndButtonOff: 'bg-purple-200 text-purple-800', slider: 'accent-pink-500', input: 'border-2 border-gray-200 focus:ring-pink-400 focus:border-pink-400', popupText: 'text-gray-800', border: 'border-pink-200',
+            toggleBgs: { exercise: 'bg-rose-50 text-rose-800', water: 'bg-purple-50 text-purple-800', mindfulness: 'bg-amber-50 text-amber-800', posture: 'bg-pink-50 text-pink-800', custom: 'bg-red-50 text-red-800', whimsy: 'bg-indigo-50 text-indigo-800', exerciseChecked: 'peer-checked:bg-rose-400', waterChecked: 'peer-checked:bg-purple-400', mindfulnessChecked: 'peer-checked:bg-amber-400', postureChecked: 'peer-checked:bg-pink-400', customChecked: 'peer-checked:bg-red-400', whimsyChecked: 'peer-checked:bg-indigo-400' }, popupColors: ['bg-rose-200', 'bg-purple-200', 'bg-amber-200', 'bg-pink-200', 'bg-red-200'],
+            content: {
+                exercise: { ideas: [{ text: "a graceful stretch" }, { text: "some light wrist circles" }, { text: "a delicate arm wave" }, { text: "a slow, elegant squat" }], title: "Elegant Movement" },
+                water: { ideas: [{ text: "Hydrate for a beautiful glow." }, { text: "A refreshing sip to feel lovely." }, { text: "Water for a delicate bloom." }], title: "Beauty Water" },
+                mindfulness: { ideas: [{ text: "Appreciate this beautiful moment." }, { text: "Notice something lovely nearby." }, { text: "Find beauty in a small detail."}], title: "A Moment of Beauty" },
+                posture: { ideas: [{ text: "Sit with elegance and poise." }, { text: "Lift your head gracefully." }, { text: "Imagine you are royalty."}], title: "Poise Check" },
+                whimsy: { ideas: [{ text: "Life hack: Arrange your apps by color for a beautiful home screen." }, { text: "Motivational boost: Like a cherry blossom, your beauty is unique." }, { text: "Joke: Why don't flowers like to ride bikes? They keep losing their petals!"}, {text: "Tip: Find something beautiful and appreciate it for a full minute."}, {text: "Embrace your own unique bloom."}], title: "Whimsy!" }
+            }
+        },
+          autumn: {
+            name: "Autumn Cozy 🍂", titleFont: 'font-roboto-slab', popupTitleFont: 'font-roboto-slab', taglineEmoji: '🍂', bg: 'bg-orange-50', pattern: 'bg-pattern-lines', header: 'text-orange-800', primaryText: 'text-gray-700', hoverPrimaryText: 'hover:text-orange-700', secondaryText: 'text-gray-500', mainCard: 'bg-white/80 border-orange-200', counterCard: 'bg-orange-100/80 border-orange-200', settingsHeader: 'text-amber-800', counterText: 'text-orange-800', button: 'bg-orange-600 hover:bg-orange-700', dndButtonOn: 'bg-red-500 text-white', dndButtonOff: 'bg-red-200 text-red-800', slider: 'accent-orange-600', input: 'border-2 border-gray-200 focus:ring-orange-500 focus:border-orange-500', popupText: 'text-gray-800', border: 'border-orange-200',
+            toggleBgs: { exercise: 'bg-amber-50 text-amber-800', water: 'bg-yellow-50 text-yellow-800', mindfulness: 'bg-orange-50 text-orange-800', posture: 'bg-red-50 text-red-800', custom: 'bg-stone-50 text-stone-800', whimsy: 'bg-lime-50 text-lime-800', exerciseChecked: 'peer-checked:bg-amber-500', waterChecked: 'peer-checked:bg-yellow-500', mindfulnessChecked: 'peer-checked:bg-orange-500', postureChecked: 'peer-checked:bg-red-500', customChecked: 'peer-checked:bg-stone-500', whimsyChecked: 'peer-checked:bg-lime-500' }, popupColors: ['bg-amber-200', 'bg-yellow-200', 'bg-orange-200', 'bg-red-200'],
+            content: {
+                exercise: { ideas: [{ text: "a cozy stretch by the window" }, { text: "a brisk walk to feel the crisp air" }, { text: "some warm-up shoulder rolls" }, { text: "a gentle seated twist" }], title: "Cozy Movement" },
+                water: { ideas: [{ text: "Time for a warm drink! ☕" }, { text: "A sip of water or warm tea." }, { text: "A comforting sip of water." }, { text: "How about some spiced apple cider?" }, { text: "A cool glass of water is good too!" }], title: "Stay Hydrated" },
+                mindfulness: { ideas: [{ text: "Notice the colors of autumn." }, { text: "Listen to the rustling leaves." }, { text: "Think about something you're grateful for."}], title: "Autumn Calm" },
+                posture: { ideas: [{ text: "Sit cozy and straight." }, { text: "A warm posture check." }, { text: "Snuggle into a good posture."}], title: "Cozy Posture" },
+                whimsy: { ideas: [{ text: "Fun fact: The word 'autumn' comes from the ancient Etruscan root 'autu', meaning 'the passing of the year'." }, { text: "Joke: What do you call a spooky, hot drink? A goblin!" }, { text: "Motivational boost: Let go of what you don't need, just like the trees."}, {text: "Riddle: What has many keys but can’t open a single lock? A piano."}, {text: "You are as comforting as a warm blanket on a chilly day."}], title: "Whimsy!" }
+            }
+        },
+        minimalist: {
+            name: "Clean & Simple ⚪️", titleFont: '', popupTitleFont: '', taglineEmoji: '⚪️', bg: 'bg-gray-50', pattern: '', header: 'text-gray-800', primaryText: 'text-gray-700', hoverPrimaryText: 'hover:text-black', secondaryText: 'text-gray-500', mainCard: 'bg-white/80 border-gray-200', counterCard: 'bg-white/80 border-gray-200', settingsHeader: 'text-gray-700', counterText: 'text-gray-800', button: 'bg-gray-700 hover:bg-gray-800', dndButtonOn: 'bg-slate-500 text-white', dndButtonOff: 'bg-slate-200 text-slate-800', slider: 'accent-gray-600', input: 'border-2 border-gray-200 focus:ring-gray-500 focus:border-gray-500', popupText: 'text-gray-800', border: 'border-gray-200',
+            toggleBgs: { exercise: 'bg-gray-200 text-gray-800', water: 'bg-gray-200 text-gray-800', mindfulness: 'bg-gray-200 text-gray-800', posture: 'bg-gray-200 text-gray-800', custom: 'bg-gray-200 text-gray-800', whimsy: 'bg-gray-200 text-gray-800', exerciseChecked: 'peer-checked:bg-gray-600', waterChecked: 'peer-checked:bg-gray-600', mindfulnessChecked: 'peer-checked:bg-gray-600', postureChecked: 'peer-checked:bg-gray-600', customChecked: 'peer-checked:bg-gray-600', whimsyChecked: 'peer-checked:bg-gray-600' }, popupColors: ['bg-gray-200'],
+            content: {
+                exercise: { ideas: [{ text: "a scheduled movement break" }, { text: "a brief physical activity" }, { text: "a seated spinal twist" }, { text: "alternating leg lifts" }], title: "Movement" },
+                water: { ideas: [{ text: "Hydration reminder." }, { text: "Consume water." }, { text: "Maintain fluid levels." }], title: "Hydration" },
+                mindfulness: { ideas: [{ text: "Brief mindfulness exercise." }, { text: "A moment to re-center." }, { text: "Focus on your breathing pattern."}], title: "Focus" },
+                posture: { ideas: [{ text: "Posture check." }, { text: "Adjust sitting position." }, { text: "Elongate your spine."}], title: "Posture" },
+                whimsy: { ideas: [{ text: "Tip: The 20-20-20 rule: every 20 minutes, look at something 20 feet away for 20 seconds to reduce eye strain." }, { text: "Fact: The human brain weighs about 3 pounds." }, { text: "Motivational boost: Progress, not perfection."}, {text: "Riddle: What is always in front of you but can’t be seen? The future."}, {text: "Life Hack: Use a sticky note to clean between the keys of your keyboard."}], title: "Whimsy!" }
+            }
+        },
+        nightmode: {
+            name: "Night Mode 🦉", titleFont: 'font-roboto-slab', popupTitleFont: 'font-roboto-slab', taglineEmoji: '🦉', bg: 'bg-gray-900', pattern: '', header: 'text-gray-200', primaryText: 'text-gray-100', hoverPrimaryText: 'hover:text-white', secondaryText: 'text-gray-400', mainCard: 'bg-gray-800/80 border-gray-700', counterCard: 'bg-gray-700/80 border-gray-600', settingsHeader: 'text-gray-300', counterText: 'text-white', button: 'bg-gray-600 hover:bg-gray-500', dndButtonOn: 'bg-indigo-500 text-white', dndButtonOff: 'bg-indigo-900 text-indigo-300', slider: 'accent-gray-400', input: 'bg-gray-700 border-2 border-gray-600 text-white focus:ring-gray-500 focus:border-gray-500', popupText: 'text-gray-100', border: 'border-gray-600',
+            toggleBgs: { exercise: 'bg-gray-700 text-gray-300', water: 'bg-gray-700 text-gray-300', mindfulness: 'bg-gray-700 text-gray-300', posture: 'bg-gray-700 text-gray-300', custom: 'bg-gray-700 text-gray-300', whimsy: 'bg-gray-700 text-gray-300', exerciseChecked: 'peer-checked:bg-gray-500', waterChecked: 'peer-checked:bg-gray-500', mindfulnessChecked: 'peer-checked:bg-gray-500', postureChecked: 'peer-checked:bg-gray-500', customChecked: 'peer-checked:bg-gray-500', whimsyChecked: 'peer-checked:bg-gray-500' }, popupColors: ['bg-gray-700'],
+            content: {
+                exercise: { ideas: [{ text: "a quiet stretch" }, { text: "some gentle joint rotations" }, { text: "a slow neck stretch" }, { text: "some wrist flexes" }], title: "Quiet Movement" },
+                water: { ideas: [{ text: "Don't forget to drink water." }, { text: "A moment for hydration." }, { text: "Hydrate in the quiet." }], title: "Hydration Check" },
+                mindfulness: { ideas: [{ text: "A moment of quiet focus." }, { text: "Breathe deeply for 30 seconds." }, { text: "Listen to the silence."}], title: "Quiet Focus" },
+                posture: { ideas: [{ text: "A quick posture adjustment." }, { text: "Reset your sitting position." }, { text: "Relax your jaw and shoulders."}], title: "Posture Reset" },
+                whimsy: { ideas: [{ text: "Riddle: What has an eye, but cannot see? A needle." }, { text: "Fact: The total weight of all ants on Earth is estimated to be about the same as all humans." }, { text: "Motivational boost: Even the darkest night will end and the sun will rise."}, {text: "A group of owls is called a parliament."}, {text: "Tip: Take a moment to look at the moon and stars tonight."}], title: "Whimsy!" }
+            }
+        }
+      };
+
+      // --- STATE MANAGEMENT ---
+      const defaultSettings = { 
+        exerciseEnabled: true, waterEnabled: true, mindfulnessEnabled: true, postureEnabled: true, customEnabled: false, whimsyEnabled: true, 
+        minInterval: 30, maxInterval: 90, activeStartTime: 8, activeEndTime: 22 
+      };
+      const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('reminderSettings')) || defaultSettings);
+      const [completedCount, setCompletedCount] = useState(() => {
+        const saved = JSON.parse(localStorage.getItem('reminderState'));
+        if (saved && new Date(saved.date).toDateString() === new Date().toDateString()) {
+          return saved.count;
+        }
+        return 0;
+      });
+      const [theme, setTheme] = useState(() => localStorage.getItem('reminderTheme') || 'sweetberry');
+      const [customReminders, setCustomReminders] = useState(() => JSON.parse(localStorage.getItem('customReminders')) || []);
+      const [newCustomReminder, setNewCustomReminder] = useState("");
+      const [currentReminder, setCurrentReminder] = useState(null);
+      const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+      const [isDismissing, setIsDismissing] = useState(false);
+      const [showConfetti, setShowConfetti] = useState(0); // 0 = no, 1 = normal, 2 = milestone
+      const [volume, setVolume] = useState(() => parseFloat(localStorage.getItem('reminderVolume') || '0.5'));
+      const [sound, setSound] = useState(() => localStorage.getItem('reminderSound') || 'ping');
+      const [exerciseDuration, setExerciseDuration] = useState(() => parseInt(localStorage.getItem('exerciseDuration') || '0', 10));
+      const [isDND, setIsDND] = useState(false);
+      const [notification, setNotification] = useState('');
+      
+      const [timerSeconds, setTimerSeconds] = useState(0);
+      const [timerState, setTimerState] = useState('idle'); // idle, running, paused, finished
+      const timerIntervalRef = useRef(null);
+      const nudgeTimerRef = useRef(null);
+      const soundIntervalRef = useRef(null);
+      const audioCtxRef = useRef(null);
+      const activeTheme = themes[theme];
+      const isVibrationSupported = 'vibrate' in navigator;
+
+      // --- LOCALSTORAGE SAVING ---
+      useEffect(() => { localStorage.setItem('reminderSettings', JSON.stringify(settings)); }, [settings]);
+      useEffect(() => { 
+        const stateToSave = { count: completedCount, date: new Date().toISOString() };
+        localStorage.setItem('reminderState', JSON.stringify(stateToSave));
+      }, [completedCount]);
+      useEffect(() => { localStorage.setItem('reminderTheme', theme); }, [theme]);
+      useEffect(() => { localStorage.setItem('customReminders', JSON.stringify(customReminders)); }, [customReminders]);
+      useEffect(() => { localStorage.setItem('reminderVolume', volume); }, [volume]);
+      useEffect(() => { localStorage.setItem('reminderSound', sound); }, [sound]);
+      useEffect(() => { localStorage.setItem('exerciseDuration', exerciseDuration); }, [exerciseDuration]);
+      
+      const categoryEmojis = { exercise: '🧘‍♀️', water: '💧', mindfulness: '😌', posture: '💖', custom: '✍️', whimsy: '✨' };
+      
+      const soundProfiles = {
+          ping: [{ type: 'sine', freq: 600, len: 0.5 }],
+          chime: [{ type: 'triangle', freq: 880, len: 0.7 }, { type: 'triangle', freq: 1046.5, len: 0.7 }],
+          sparkle: [{ type: 'square', freq: 1200, len: 0.3 }],
+          finish: [{ type: 'sine', freq: 800, len: 0.2 }, { type: 'sine', freq: 1000, len: 0.2, delay: 0.1 }]
+      };
+
+      // --- AUDIO & VIBRATION ALERT ---
+      const playSound = useCallback((soundName, loop = false) => {
+        clearInterval(soundIntervalRef.current);
+        if (soundName === 'vibrate') {
+            if ('vibrate' in navigator) navigator.vibrate(200);
+            if (loop) soundIntervalRef.current = setInterval(() => navigator.vibrate(200), 10000);
+            return;
+        }
+        if (soundName === 'none' || volume <= 0) return;
+        
+        const play = () => {
+          let localAudioCtx = audioCtxRef.current;
+          if (!localAudioCtx) {
+            try { localAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtxRef.current = localAudioCtx; } 
+            catch (e) { console.error("Web Audio API not supported"); return; }
+          }
+          if (localAudioCtx.state === 'suspended') localAudioCtx.resume();
+          
+          const profiles = soundProfiles[soundName] || [];
+          profiles.forEach(profile => {
+              const o = localAudioCtx.createOscillator(); const g = localAudioCtx.createGain();
+              o.connect(g); g.connect(localAudioCtx.destination);
+              const startTime = localAudioCtx.currentTime + (profile.delay || 0);
+              o.type = profile.type; o.frequency.setValueAtTime(profile.freq, startTime);
+              g.gain.setValueAtTime(volume * 0.15, startTime);
+              g.gain.exponentialRampToValueAtTime(0.00001, startTime + profile.len);
+              o.start(startTime); o.stop(startTime + profile.len);
+          });
+        }
+        play();
+        if (loop) soundIntervalRef.current = setInterval(play, 10000);
+      }, [volume]);
+
+      // --- CORE LOGIC ---
+      const generateReminder = useCallback(() => {
+        let availableTypes = Object.keys(settings).filter(k => {
+          if (!k.endsWith('Enabled') || !settings[k]) return false;
+          if (k === 'customEnabled' && customReminders.length === 0) return false;
+          return true;
+        });
+
+        if (availableTypes.length === 0) return null;
+        
+        const typeKeyRaw = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+        const typeKey = typeKeyRaw.replace('Enabled', '');
+
+        const color = activeTheme.popupColors[Math.floor(Math.random() * activeTheme.popupColors.length)];
+        const popupText = activeTheme.popupText;
+        const popupTitleFont = activeTheme.popupTitleFont;
+        let duration = 0;
+        
+        if (typeKey === 'custom') {
+            const idea = customReminders[Math.floor(Math.random() * customReminders.length)];
+            return { type: 'custom', title: "A Little Note...", text: idea, color, popupText, popupTitleFont, duration };
+        }
+        
+        const content = activeTheme.content[typeKey];
+        const idea = content.ideas[Math.floor(Math.random() * content.ideas.length)];
+        let text = idea.text;
+        
+        if (typeKey === 'exercise') {
+          if (exerciseDuration === 0) {
+            const randomDurations = [60, 180, 300, 420];
+            duration = randomDurations[Math.floor(Math.random() * randomDurations.length)];
+          } else {
+            duration = exerciseDuration;
+          }
+          const durationInMinutes = duration / 60;
+          text = `How about ${durationInMinutes} minute${durationInMinutes > 1 ? 's' : ''} of ${idea.text}?`;
+        } else if (typeKey === 'mindfulness' && idea.timer) {
+          duration = idea.timer;
+        }
+        
+        return { type: typeKey, title: content.title, text, color, popupText, popupTitleFont, duration };
+      }, [settings, activeTheme, customReminders, exerciseDuration]);
+      
+      const showReminder = useCallback(() => {
+        const reminder = generateReminder();
+        if(reminder){ 
+          setCurrentReminder(reminder); 
+          playSound(sound, true);
+          if ((reminder.type === 'exercise' || (reminder.type === 'mindfulness' && reminder.duration > 0)) && reminder.duration > 0) {
+            setTimerSeconds(reminder.duration);
+            setTimerState('idle');
+          }
+        } 
+      }, [generateReminder, playSound, sound]);
+      
+      useEffect(() => {
+        const scheduleNextReminder = () => {
+            clearTimeout(nudgeTimerRef.current);
+            if (isDND) return;
+
+            const now = new Date();
+            const currentHour = now.getHours();
+            const { activeStartTime, activeEndTime } = settings;
+
+            let isActive = false;
+            // Case 1: Same-day schedule (e.g., 8 AM to 10 PM)
+            if (activeStartTime < activeEndTime) {
+                isActive = currentHour >= activeStartTime && currentHour < activeEndTime;
+            } else { // Case 2: Overnight schedule (e.g., 10 PM to 8 AM)
+                isActive = currentHour >= activeStartTime || currentHour < activeEndTime;
+            }
+
+            if (isActive) {
+                const minMs = settings.minInterval * 60 * 1000;
+                const maxMs = settings.maxInterval * 60 * 1000;
+                const delay = minMs >= maxMs ? minMs : Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+                nudgeTimerRef.current = setTimeout(showReminder, delay);
+            } else {
+                let nextActiveTime = new Date();
+                nextActiveTime.setHours(activeStartTime, 0, 0, 0);
+                
+                // If today's start time has already passed, set it for tomorrow
+                if (nextActiveTime < now) {
+                    nextActiveTime.setDate(nextActiveTime.getDate() + 1);
+                }
+
+                const delayUntilNextWindow = nextActiveTime.getTime() - now.getTime();
+                nudgeTimerRef.current = setTimeout(scheduleNextReminder, delayUntilNextWindow);
+            }
+        };
+
+        if (!currentReminder) {
+          scheduleNextReminder();
+        }
+
+        return () => clearTimeout(nudgeTimerRef.current);
+      }, [currentReminder, settings, isDND, showReminder]);
+      
+      // Timer effect
+      useEffect(() => {
+        if (timerState === 'running' && timerSeconds > 0) {
+          timerIntervalRef.current = setInterval(() => {
+            setTimerSeconds(prev => prev - 1);
+          }, 1000);
+        } else if (timerSeconds <= 0 && timerState === 'running') {
+          setTimerState('finished');
+          playSound('finish');
+        }
+        return () => clearInterval(timerIntervalRef.current);
+      }, [timerState, timerSeconds, playSound]);
+      
+      // Keyboard shortcuts
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (e.key === 'Escape') {
+            if (isSettingsOpen) {
+              setIsSettingsOpen(false);
+            } else if (currentReminder) {
+              handleSnooze();
+            }
+          }
+          if (e.key === 'Enter' && currentReminder && (timerState === 'finished' || currentReminder.duration === 0)) {
+            handleComplete();
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [currentReminder, isSettingsOpen, timerState]);
+
+      // --- HANDLERS ---
+      const handleComplete = () => {
+        const newCount = completedCount + 1;
+        const milestones = [5, 10, 25, 50, 100];
+        if (milestones.includes(newCount)) {
+            setShowConfetti(2); // Milestone celebration
+        } else {
+            setShowConfetti(1);
+        }
+        setCompletedCount(newCount);
+        setIsDismissing(true);
+        setTimerState('idle');
+        clearInterval(timerIntervalRef.current);
+        clearInterval(soundIntervalRef.current);
+        setTimeout(() => setShowConfetti(0), 4000);
+        setTimeout(() => { setCurrentReminder(null); setIsDismissing(false); }, 500);
+      };
+
+      const handleSkip = () => { // Doesn't increment count
+        setIsDismissing(true);
+        setTimerState('idle');
+        clearInterval(timerIntervalRef.current);
+        clearInterval(soundIntervalRef.current);
+        setTimeout(() => { setCurrentReminder(null); setIsDismissing(false); }, 500);
+      };
+
+      const handleSnooze = useCallback(() => {
+         setIsDismissing(true);
+         setTimerState('idle');
+         clearInterval(timerIntervalRef.current);
+         clearInterval(soundIntervalRef.current);
+         setTimeout(() => {
+           setCurrentReminder(null); setIsDismissing(false);
+         }, 500);
+      }, []);
+
+      const handleAddCustomReminder = (e) => {
+        e.preventDefault();
+        if (newCustomReminder.trim()) {
+            setCustomReminders(prev => [...prev, newCustomReminder.trim()]);
+            setNewCustomReminder("");
+        }
+      };
+
+      const handleDeleteCustomReminder = (indexToDelete) => {
+        setCustomReminders(prev => prev.filter((_, index) => index !== indexToDelete));
+      };
+      
+      const handleSoundChange = (newSound) => {
+        setSound(newSound);
+        playSound(newSound);
+      };
+      
+      const handleResetCount = () => {
+        setCompletedCount(0);
+        setNotification("Daily count has been reset!");
+      };
+
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+      };
+
+      return (
+        <React.Fragment>
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Inter:wght@400;600&family=Patrick+Hand&family=Dancing+Script&family=Satisfy&family=Roboto+Slab:wght@600&display=swap');
+            html, body { height: 100%; margin: 0; }
+            #root { height: 100%; }
+            body { font-family: 'Inter', sans-serif; }
+            .font-pacifico { font-family: 'Pacifico', cursive; }
+            .font-patrick-hand { font-family: 'Patrick Hand', cursive; }
+            .font-dancing-script { font-family: 'Dancing Script', cursive; }
+            .font-satisfy { font-family: 'Satisfy', cursive; }
+            .font-roboto-slab { font-family: 'Roboto Slab', serif; }
+            .bg-pattern-dots { background-image: radial-gradient(circle, rgba(0,0,0,0.04) 1px, transparent 1px); background-size: 20px 20px; }
+            .bg-pattern-lines { background-image: linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px); background-size: 30px 30px; }
+            .bg-pattern-sparkles { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="30" height="30"><path d="M50 10 L 55 45 L 90 50 L 55 55 L 50 90 L 45 55 L 10 50 L 45 45 Z" fill="rgba(0,0,0,0.05)"/></svg>'); }
+            @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+            @keyframes wiggle { 0%, 100% { transform: rotate(-1deg); } 50% { transform: rotate(1deg); } }
+            @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.9); } }
+            @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; translateY(0); } }
+            .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+            .animate-wiggle { animation: wiggle 0.3s ease-in-out 2 0.5s; }
+            .animate-fade-out { animation: fadeOut 0.3s ease-in forwards; }
+            .animate-fade-in-up { animation: fadeInUp 0.5s ease-out forwards; }
+            .confetti-piece { position: absolute; width: 8px; height: 16px; top: 50%; left: 50%; opacity: 0; animation: confetti-fall 4s ease-out forwards; }
+            @keyframes confetti-fall { 0% { transform: translate(0, 0) rotate(0); opacity: 1; } 100% { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0; } }
+            .custom-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 12px; background: #ddd; border-radius: 6px; outline: none; transition: opacity .2s; }
+            .custom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%; background: currentColor; cursor: pointer; }
+            .custom-slider::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: currentColor; cursor: pointer; border: none; }
+          `}</style>
+
+          <div className={`min-h-screen p-4 sm:p-8 flex items-center justify-center transition-colors duration-500 ${activeTheme.bg} ${activeTheme.pattern}`}>
+            <div className="w-full max-w-lg mx-auto text-center">
+              <header>
+                <h1 className={`text-5xl sm:text-6xl ${activeTheme.header} ${activeTheme.titleFont} transition-colors duration-500`}>Nudge</h1>
+                <p className={`pt-4 ${activeTheme.secondaryText}`}>Your little helper for a healthier, happier day! {activeTheme.taglineEmoji}</p>
+              </header>
+
+              <div className="flex justify-center my-8">
+                  <div className={`w-auto backdrop-blur-sm p-6 px-8 rounded-2xl shadow-lg transition-colors duration-500 flex flex-col justify-center items-center ${activeTheme.counterCard}`}>
+                      <div className={`font-bold text-6xl transition-colors duration-500 ${activeTheme.counterText} ${activeTheme.titleFont}`}>{completedCount}</div>
+                      <div className={`text-md mt-1 ${activeTheme.secondaryText}`}>Nudges Today!</div>
+                  </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                  <button onClick={showReminder} className={`w-full sm:w-auto text-white font-bold py-3 px-6 rounded-full shadow-md transition-transform transform hover:scale-110 ${activeTheme.button}`}>Summon a Nudge ✨</button>
+                  <button onClick={() => setIsSettingsOpen(true)} className={`w-full sm:w-auto font-bold py-3 px-6 rounded-full shadow-md transition-transform transform hover:scale-110 bg-white/80 ${activeTheme.primaryText}`}>Settings ⚙️</button>
+              </div>
+                <div className="mt-8">
+                  <button onClick={() => setIsDND(!isDND)} className={`transition-all duration-300 rounded-full p-3 shadow-md ${isDND ? activeTheme.dndButtonOn : activeTheme.dndButtonOff}`}>
+                    {isDND ? '🌙 DND On' : '☀️ DND Off'}
+                  </button>
+                </div>
+            </div>
+          </div>
+          
+          <SettingsModal 
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            activeTheme={activeTheme}
+            themes={themes}
+            currentTheme={theme}
+            onSetTheme={setTheme}
+            settings={settings}
+            onSetSettings={setSettings}
+            categoryEmojis={categoryEmojis}
+            newCustomReminder={newCustomReminder}
+            onSetNewCustomReminder={setNewCustomReminder}
+            onAddCustomReminder={handleAddCustomReminder}
+            customReminders={customReminders}
+            onDeleteCustomReminder={handleDeleteCustomReminder}
+            volume={volume}
+            onSetVolume={setVolume}
+            sound={sound}
+            onSoundChange={handleSoundChange}
+            exerciseDuration={exerciseDuration}
+            onSetExerciseDuration={setExerciseDuration}
+            onResetCount={handleResetCount}
+            isVibrationSupported={isVibrationSupported}
+          />
+
+          {currentReminder && (
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <div className={`${currentReminder.popupText} p-8 rounded-2xl shadow-2xl text-center max-w-md w-full transform transition-all duration-500 relative ${currentReminder.color} ${isDismissing ? 'animate-fade-out' : 'animate-fade-in animate-wiggle'}`}>
+                <div className={"absolute inset-0 flex justify-center items-center opacity-20"}>{illustrations[currentReminder.type]}</div>
+                <h3 className={`text-4xl mb-4 relative ${currentReminder.popupTitleFont}`}>{currentReminder.title}</h3>
+                <p className="text-xl mb-6 relative">{currentReminder.text}</p>
+                
+                {(currentReminder.type === 'exercise' || (currentReminder.type === 'mindfulness' && currentReminder.duration > 0)) && currentReminder.duration > 0 && (
+                  <div className="relative mb-6">
+                    <div className={`text-5xl font-bold ${activeTheme.counterText}`}>{timerState !== 'finished' ? formatTime(timerSeconds) : "Well Done!"}</div>
+                    <div className="flex justify-center gap-2 mt-4">
+                      {timerState === 'idle' && <button onClick={() => setTimerState('running')} className="bg-white/80 hover:bg-white text-gray-800 font-bold py-2 px-4 rounded-full shadow-sm">Start</button>}
+                      {timerState === 'running' && <button onClick={() => setTimerState('paused')} className="bg-white/80 hover:bg-white text-gray-800 font-bold py-2 px-4 rounded-full shadow-sm">Pause</button>}
+                      {timerState === 'paused' && <button onClick={() => setTimerState('running')} className="bg-white/80 hover:bg-white text-gray-800 font-bold py-2 px-4 rounded-full shadow-sm">Resume</button>}
+                        {(timerState === 'running' || timerState === 'paused') && <button onClick={() => { setTimerState('idle'); setTimerSeconds(currentReminder.duration); }} className="bg-white/50 hover:bg-white/80 text-gray-600 font-bold py-2 px-4 rounded-full shadow-sm">Reset</button>}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex flex-col sm:flex-row justify-center gap-3 relative">
+                    { (timerState === 'idle' || timerState === 'finished' || currentReminder.duration === 0) &&
+                      <button onClick={handleSnooze} className="bg-white/50 hover:bg-white/80 text-gray-600 font-bold py-2 px-5 rounded-full shadow-sm transition-transform transform hover:scale-105">Snooze</button>
+                    }
+                    { (timerState === 'finished' || currentReminder.duration === 0) &&
+                      <button onClick={handleComplete} className="bg-white hover:bg-white/90 text-gray-800 font-bold py-2 px-6 rounded-full shadow-md transition-transform transform hover:scale-105 relative overflow-hidden">
+                          Got it!
+                          <Confetti active={showConfetti === 1} intensity={1} />
+                      </button>
+                    }
+                     { (timerState === 'idle' && (currentReminder.type === 'exercise' || (currentReminder.type === 'mindfulness' && currentReminder.duration > 0))) && (
+                        <button onClick={handleSkip} className="bg-white/80 hover:bg-white/90 text-gray-700 font-bold py-2 px-6 rounded-full shadow-md transition-transform transform hover:scale-105 relative overflow-hidden">
+                          Skip
+                        </button>
+                     )}
+                </div>
+              </div>
+            </div>
+          )}
+          {showConfetti === 2 && (
+            <div className="fixed inset-0 pointer-events-none z-[100] w-full h-full">
+              <Confetti active={true} intensity={5} />
+            </div>
+          )}
+          <Notification message={notification} onClear={() => setNotification('')} />
+        </React.Fragment>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js').then(registration => {
+          console.log('SW registered: ', registration);
+        }).catch(registrationError => {
+          console.log('SW registration failed: ', registrationError);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
+
+
